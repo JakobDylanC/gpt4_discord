@@ -8,7 +8,6 @@ load_dotenv()
 if "OPENAI_API_KEY" not in os.environ:
     raise ValueError(f"Required environment variable OPENAI_API_KEY is not set.")
 
-openai.api_key = os.environ["OPENAI_API_KEY"]
 GPT4_MODEL = "gpt-4"
 GPT4_TOKENS_PER_MESSAGE = 3
 GPT4_TOKENS_PER_NAME = 1
@@ -17,6 +16,7 @@ GPT4_MAX_TOTAL_TOKENS = 8192
 MAX_COMPLETION_TOKENS = 1024 #customize here, must be less than GPT4_MAX_TOTAL_TOKENS
 MAX_PROMPT_TOKENS = GPT4_MAX_TOTAL_TOKENS - MAX_COMPLETION_TOKENS - GPT4_TOKENS_PER_MESSAGES
 TIMEOUT_SECONDS = 120
+openai.api_key = os.environ["OPENAI_API_KEY"]
 encoding = tiktoken.get_encoding("cl100k_base")
 
 @backoff.on_exception(backoff.expo, openai.error.RateLimitError)

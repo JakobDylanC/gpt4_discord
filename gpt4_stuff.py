@@ -70,13 +70,13 @@ def count_tokens(msg):
     return num_tokens
 
 
-def split_string_clean(string, max_length):
+def split_string_not_words(string, max_length):
     if len(string) <= max_length:
         return [string]
     string_chunks = []
     start_index = 0
     while start_index < len(string):
-        end_index = min(start_index + max_length, len(string))
+        end_index = min(start_index+max_length, len(string))
         split_index = string.rfind(" ", start_index, end_index) if end_index < len(string) else end_index
         end_index = split_index if split_index != -1 else end_index
         string_chunks.append(string[start_index:end_index])

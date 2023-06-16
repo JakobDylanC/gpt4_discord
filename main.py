@@ -9,7 +9,9 @@ REQUIRED_ENV_VARS = ["DISCORD_BOT_TOKEN", "CUSTOM_SYSTEM_PROMPT"]
 if (missing_env_vars := [var for var in REQUIRED_ENV_VARS if var not in os.environ]):
     raise ValueError(f"Required environment variables are not set: {', '.join(missing_env_vars)}")
 
-DISCORD_MSG_LENGTH_LIMIT = 2000
+DISCORD_EMBED_MAX_LENGTH = 4096
+EMBED_COLOR_INCOMPLETE = discord.Color.orange()
+EMBED_COLOR_COMPLETE = discord.Color.green()
 intents = discord.Intents.default()
 intents.message_content = True
 bot = discord.Client(intents=intents)
@@ -35,6 +37,7 @@ class MsgNode:
         return chain[::-1]
 msg_nodes = {}
 
+
 @bot.event
 async def on_message(message):
     if bot.user not in message.mentions or message.author.bot:
@@ -54,9 +57,10 @@ async def on_message(message):
         elif message.reference:
             try:
                 ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                if ref_msg.content:
-                    author_role = "assistant" if ref_msg.author == bot.user else "user"
-                    msg_nodes[ref_msg.id] = MsgNode({"role": author_role, "content": ref_msg.content, "name": str(ref_msg.author.id)})
+                ref_msg_content = ref_msg.embeds[0].description if ref_msg.author == bot.user else ref_msg.content
+                if ref_msg_content:
+                    ref_msg_author_role = "assistant" if ref_msg.author == bot.user else "user"
+                    msg_nodes[ref_msg.id] = MsgNode({"role": ref_msg_author_role, "content": ref_msg_content, "name": str(ref_msg.author.id)})
                     msg_nodes[message.id].reply_to = msg_nodes[ref_msg.id]
             except discord.DiscordException:
                 print("Error fetching the referenced message")
@@ -68,28 +72,29 @@ async def on_message(message):
         msgs = msg_nodes[message.id].get_reply_chain(system_prompt_tokens)
         if not msgs: return
         response_messages = []
-        response = ""
-        edit_message_task = None
-        previous_delta = None
+        response_message_contents = []
         async for current_delta in gpt4_stuff.chat_completion_stream(system_prompt, msgs):
-            if previous_delta != None:
+            if "previous_delta" in locals():
                 current_delta_content = current_delta.get("content", "")
                 previous_delta_content = previous_delta.get("content", "")
                 if previous_delta_content != "":
-                    if response_messages == [] or len(response_message_content+previous_delta_content) > DISCORD_MSG_LENGTH_LIMIT:
-                        response_messages.append(await message.reply(content=previous_delta_content))
+                    if response_messages == [] or len(response_message_contents[-1]+previous_delta_content) > DISCORD_EMBED_MAX_LENGTH:
+                        reply_message = message if response_messages == [] else response_messages[-1]
+                        response_messages.append(await reply_message.reply(embed=discord.Embed(description=previous_delta_content, color=EMBED_COLOR_INCOMPLETE)))
+                        response_message_contents.append("")
                         in_progress_message_ids.append(response_messages[-1].id)
-                        response_message_content = ""
-                    response_message_content += previous_delta_content
-                    response += previous_delta_content
-                    if edit_message_task is None or edit_message_task.done() or len(response_message_content+current_delta_content) > DISCORD_MSG_LENGTH_LIMIT or current_delta == {}:
-                        while isinstance(edit_message_task, asyncio.Task) and not edit_message_task.done():
+                    response_message_contents[-1] += previous_delta_content
+                    last_message_edit = True if (len(response_message_contents[-1]+current_delta_content) > DISCORD_EMBED_MAX_LENGTH or current_delta == {}) else False
+                    if "edit_message_task" not in locals() or edit_message_task.done() or last_message_edit:
+                        while "edit_message_task" in locals() and not edit_message_task.done():
                             await asyncio.sleep(0)
-                        edit_message_task = asyncio.create_task(response_messages[-1].edit(content=response_message_content))
+                        embed_color = EMBED_COLOR_COMPLETE if last_message_edit else EMBED_COLOR_INCOMPLETE
+                        edit_message_task = asyncio.create_task(response_messages[-1].edit(embed=discord.Embed(description=response_message_contents[-1], color=embed_color)))
             previous_delta = current_delta
         for response_message in response_messages:
-            msg_nodes[response_message.id] = MsgNode({"role": "assistant", "content": response}, reply_to=msg_nodes[message.id])
+            msg_nodes[response_message.id] = MsgNode({"role": "assistant", "content": ''.join(response_message_contents)}, reply_to=msg_nodes[message.id])
             in_progress_message_ids.remove(response_message.id)
+
 
 async def main():
     await bot.start(os.environ["DISCORD_BOT_TOKEN"])
